@@ -61,8 +61,9 @@ public abstract class ProGuardTask extends DefaultTask
     protected final Configuration             rawConfiguration    = new Configuration();
     // Merged configuration, combining configuration values from all sources, including external configuration files
     private         Configuration             mergedConfiguration = null;
+    private         Configuration             minimalMergedConfiguration = null;
     // Proguard task configuration, represented in a format usable by Gradle to track all inputs and outputs.
-    private   final ProGuardTaskConfiguration taskConfiguration   = ProGuardTaskConfiguration.create(getConfigurationProvider(), getObjectFactory());
+    private   final ProGuardTaskConfiguration taskConfiguration   = ProGuardTaskConfiguration.create(getConfigurationProvider(), getMinimalConfigurationProvider(), getOutJarFileCollection(), getObjectFactory());
 
     // Fields acting as parameters for the class member specification methods.
     private boolean            allowValues;
@@ -1400,17 +1401,23 @@ public abstract class ProGuardTask extends DefaultTask
         return rawConfiguration;
     }
 
+    private synchronized void invalidateMergedConfiguration() {
+        if (minimalMergedConfiguration != null || mergedConfiguration != null) {
+            getLogger().warn("WARNING: Proguard task configuration has been updated after task dependencies calculated.\n" +
+                                 "         Configuration will be re-loaded, but additional settings will not be correctly tracked as task inputs.");
+            mergedConfiguration = null;
+            minimalMergedConfiguration = null;
+        }
+    }
+
     private Provider<Configuration> getConfigurationProvider()
     {
         return getConfigurationFiles().getElements().map(this::getMergedConfiguration);
     }
-    
-    private synchronized void invalidateMergedConfiguration() {
-        if (mergedConfiguration != null) {
-            getLogger().warn("WARNING: Proguard task configuration has been updated after task dependencies calculated.\n" +
-                             "         Configuration will be re-loaded, but additional settings will not be correctly tracked as task inputs.");
-            mergedConfiguration = null;
-        }
+
+    private Provider<Configuration> getMinimalConfigurationProvider()
+    {
+        return getConfigurationFiles().getElements().map(this::getMinimalMergedConfiguration);
     }
 
     private synchronized Configuration getMergedConfiguration(Collection<FileSystemLocation> configurationFiles)
@@ -1427,6 +1434,22 @@ public abstract class ProGuardTask extends DefaultTask
             }
         }
         return mergedConfiguration;
+    }
+
+    private synchronized Configuration getMinimalMergedConfiguration(Collection<FileSystemLocation> configurationFiles)
+    {
+        if (minimalMergedConfiguration == null)
+        {
+            try
+            {
+                minimalMergedConfiguration = loadMinimalConfiguration(configurationFiles);
+            }
+            catch (IOException | ParseException e)
+            {
+                throw new RuntimeException(e);
+            }
+        }
+        return minimalMergedConfiguration;
     }
 
     /**
@@ -1549,6 +1572,81 @@ public abstract class ProGuardTask extends DefaultTask
         return mergedConfiguration;
     }
 
+
+    /**
+     * Returns the configuration collected so far, resolving files and
+     * reading included configurations.
+     */
+    private Configuration loadMinimalConfiguration(Collection<FileSystemLocation> externalConfigurationFiles)
+        throws IOException, ParseException
+    {
+        getLogger().debug("Loading ProGuard configuration(). This should happen immediately prior to ProGuardTask execution.");
+
+        Configuration mergedConfiguration = ConfigurationCloner.cloneConfiguration(rawConfiguration);
+
+        // Lazily apply the external configuration files.
+        for (FileSystemLocation configFile : externalConfigurationFiles)
+        {
+
+            File file = configFile.getAsFile();
+
+            // Check if this is the name of an internal configuration file.
+            if (isInternalConfigurationFile(file))
+            {
+                getLogger().info("Loading default configuration file " +
+                                     file.getAbsolutePath());
+
+                String internalConfigFileName =
+                    internalConfigurationFileName(file);
+
+                URL configurationURL =
+                    ProGuardTask.class.getResource(internalConfigFileName);
+
+                if (configurationURL == null)
+                {
+                    throw new FileNotFoundException("'" + file.getAbsolutePath() + "'");
+                }
+
+                // Parse the configuration as a URL.
+                ConfigurationParser parser =
+                    new ConfigurationParser(configurationURL,
+                                            System.getProperties());
+
+                try
+                {
+                    parser.parse(mergedConfiguration);
+                }
+                finally
+                {
+                    parser.close();
+                }
+            }
+            else
+            {
+                getLogger().info("Loading configuration file " +
+                                     file.getAbsolutePath());
+
+                ConfigurationParser parser =
+                    new ConfigurationParser(file,
+                                            System.getProperties());
+
+                try
+                {
+                    parser.parse(mergedConfiguration);
+                }
+                finally
+                {
+                    parser.close();
+                }
+            }
+        }
+
+        // Make sure the code is processed. Gradle has already checked that it
+        // was necessary.
+        mergedConfiguration.lastModified = Long.MAX_VALUE;
+
+        return mergedConfiguration;
+    }
 
     // Small utility methods.
 

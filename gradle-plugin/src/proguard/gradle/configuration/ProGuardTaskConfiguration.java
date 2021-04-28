@@ -59,6 +59,8 @@ public class ProGuardTaskConfiguration
 {
     protected final Provider<Configuration> configurationProvider;
 
+    private Provider<Configuration> minimalConfigurationProvider;
+    private FileCollection          outJarFileCollection;
     private final FileCollection inputJars;
     private final FileCollection outputJars;
     private final FileCollection outputDirs;
@@ -68,34 +70,41 @@ public class ProGuardTaskConfiguration
     private final Provider<File> classObfuscationDictionary;
     private final Provider<File> packageObfuscationDictionary;
 
-    public ProGuardTaskConfiguration(Provider<Configuration> configurationProvider, ObjectFactory objectFactory)
+    public ProGuardTaskConfiguration(Provider<Configuration> configurationProvider, Provider<Configuration> minimalConfigurationProvider, FileCollection outJarFileCollection, ObjectFactory objectFactory)
     {
-        this.configurationProvider = configurationProvider;
-        this.inputJars = objectFactory.fileCollection().from(inputJars());
-        this.outputJars = objectFactory.fileCollection().from(outputs(false));
-        this.outputDirs = objectFactory.fileCollection().from(outputs(true));
-        this.fileFilters = fileFilters();
-        this.applyMapping = mappedProvider(config -> optionalFile(config.applyMapping));
-        this.obfuscationDictionary = mappedProvider(config -> optionalFile(config.obfuscationDictionary));
-        this.classObfuscationDictionary = mappedProvider(config -> optionalFile(config.classObfuscationDictionary));
+        this.configurationProvider        = configurationProvider;
+        this.minimalConfigurationProvider = minimalConfigurationProvider;
+        this.outJarFileCollection         = outJarFileCollection;
+        this.inputJars                    = objectFactory.fileCollection().from(inputJars());
+        this.outputJars                   = objectFactory.fileCollection().from(outputs(false));
+        this.outputDirs                   = objectFactory.fileCollection().from(outputs(true));
+        this.fileFilters                  = fileFilters();
+        this.applyMapping                 = mappedProvider(config -> optionalFile(config.applyMapping));
+        this.obfuscationDictionary        = mappedProvider(config -> optionalFile(config.obfuscationDictionary));
+        this.classObfuscationDictionary   = mappedProvider(config -> optionalFile(config.classObfuscationDictionary));
         this.packageObfuscationDictionary = mappedProvider(config -> optionalFile(config.packageObfuscationDictionary));
     }
 
-    public static ProGuardTaskConfiguration create(Provider<Configuration> configurationProvider, ObjectFactory objectFactory)
+    public static ProGuardTaskConfiguration create(Provider<Configuration> configurationProvider, Provider<Configuration> minimalConfigurationProvider, FileCollection outJarFileCollection, ObjectFactory objectFactory)
     {
         if (GradleVersionCheck.isAtLeastGradle7())
         {
-            return new ProGuardTaskConfiguration(configurationProvider, objectFactory);
+            return new ProGuardTaskConfiguration(configurationProvider, minimalConfigurationProvider, outJarFileCollection, objectFactory);
         }
         else
         {
-            return new ProGuardTaskConfigurationForGradle6(configurationProvider, objectFactory);
+            return new ProGuardTaskConfigurationForGradle6(configurationProvider, minimalConfigurationProvider, outJarFileCollection, objectFactory);
         }
     }
 
     private Configuration getConfiguration()
     {
         return configurationProvider.get();
+    }
+
+    private Configuration getMinimalConfiguration()
+    {
+        return minimalConfigurationProvider.get();
     }
 
     protected <T> Provider<T> mappedProvider(Transformer<T, Configuration> transformer)
@@ -133,19 +142,28 @@ public class ProGuardTaskConfiguration
 
     private Callable<List<File>> outputs(boolean directories)
     {
-        return () ->
+        return new Callable<List<File>>()
         {
-            List<File> files = new ArrayList<>();
-            ClassPath programJars = getConfiguration().programJars;
-            for (int i = 0; i < programJars.size(); i++)
+            @Override
+            public List<File> call() throws Exception
             {
-                ClassPathEntry classPathEntry = programJars.get(i);
-                if (classPathEntry.isOutput() && classPathEntry.isDirectory() == directories)
-                {
-                    files.add(classPathEntry.getFile());
+                List<File> files       = new ArrayList<>();
+                ClassPath  programJars = ProGuardTaskConfiguration.this.getMinimalConfiguration().programJars;
+                if (programJars != null) {
+                    for (int i = 0; i < programJars.size(); i++)
+                    {
+                        ClassPathEntry classPathEntry = programJars.get(i);
+                        if (classPathEntry.isOutput() && classPathEntry.isDirectory() == directories)
+                        {
+                            files.add(classPathEntry.getFile());
+                        }
+                    }
                 }
+                if (!directories) {
+                    files.addAll(outJarFileCollection.getFiles());
+                }
+                return files;
             }
-            return files;
         };
     }
 
@@ -258,7 +276,7 @@ public class ProGuardTaskConfiguration
     @OutputFile
     public File getPrintSeeds()
     {
-        return optionalFile(getConfiguration().printSeeds);
+        return optionalFile(getMinimalConfiguration().printSeeds);
     }
 
     ///////////////////////////////////////////////////////////////////////////
@@ -275,7 +293,7 @@ public class ProGuardTaskConfiguration
     @OutputFile
     public File getPrintUsage()
     {
-        return optionalFile(getConfiguration().printUsage);
+        return optionalFile(getMinimalConfiguration().printUsage);
     }
 
     @Optional
@@ -369,7 +387,7 @@ public class ProGuardTaskConfiguration
     @OutputFile
     public File getPrintMapping()
     {
-        return optionalFile(getConfiguration().printMapping);
+        return optionalFile(getMinimalConfiguration().printMapping);
     }
 
     @Optional
@@ -568,14 +586,14 @@ public class ProGuardTaskConfiguration
     @OutputFile
     public File getPrintConfiguration()
     {
-        return optionalFile(getConfiguration().printConfiguration);
+        return optionalFile(getMinimalConfiguration().printConfiguration);
     }
 
     @Optional
     @OutputFile
     public File getDump()
     {
-        return optionalFile(getConfiguration().dump);
+        return optionalFile(getMinimalConfiguration().dump);
     }
 
     @Input

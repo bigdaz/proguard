@@ -22,6 +22,7 @@
 package proguard.gradle.configuration;
 
 import org.gradle.api.Transformer;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.internal.provider.ProviderInternal;
 import org.gradle.api.internal.provider.TransformBackedProvider;
 import org.gradle.api.model.ObjectFactory;
@@ -30,9 +31,9 @@ import proguard.Configuration;
 
 class ProGuardTaskConfigurationForGradle6 extends ProGuardTaskConfiguration
 {
-    public ProGuardTaskConfigurationForGradle6(Provider<Configuration> configurationProvider, ObjectFactory objectFactory)
+    public ProGuardTaskConfigurationForGradle6(Provider<Configuration> configurationProvider, Provider<Configuration> minimalConfigurationProvider, FileCollection outJarFileCollection, ObjectFactory objectFactory)
     {
-        super(configurationProvider, objectFactory);
+        super(configurationProvider, minimalConfigurationProvider, outJarFileCollection, objectFactory);
     }
 
     /**
